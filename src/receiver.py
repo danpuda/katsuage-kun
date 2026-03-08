@@ -386,6 +386,44 @@ class Handler(BaseHTTPRequestHandler):
         })
         save_meta(bundle_dir, meta)
 
+        # v7.5: sandbox_files — Canvas/sandboxファイル内容を保存
+        sandbox_files = body.get('sandbox_files', [])
+        if isinstance(sandbox_files, list):
+            for sf in sandbox_files:
+                sf_name = sanitize_filename(str(sf.get('name', 'artifact.txt')))
+                sf_content = str(sf.get('content', ''))
+                sf_path_hint = str(sf.get('sandbox_path', ''))
+                if not sf_content:
+                    continue
+
+                sf_file_path = attachments_dir / sf_name
+                sf_counter = 2
+                while sf_file_path.exists():
+                    stem = Path(sf_name).stem
+                    suffix = Path(sf_name).suffix
+                    sf_file_path = attachments_dir / f'{stem}-{sf_counter}{suffix}'
+                    sf_counter += 1
+
+                sf_file_path.write_text(sf_content, encoding='utf-8')
+                sf_record = {
+                    'name': sf_name,
+                    'kind': 'canvas-artifact',
+                    'sandbox_path': sf_path_hint,
+                    'reference_only': False,
+                    'path': str(sf_file_path.relative_to(REPO)),
+                    'size': len(sf_content.encode('utf-8')),
+                    'sha256': sha256_hex(sf_content.encode('utf-8')),
+                    'saved_at': now_iso(),
+                }
+                append_attachment_record(meta, sf_record)
+                print(
+                    f'📄 {datetime.now().strftime("%H:%M:%S")} canvas artifact saved: {bundle_id}/{sf_name} '
+                    f'({len(sf_content)} chars)',
+                    flush=True,
+                )
+            if sandbox_files:
+                save_meta(bundle_dir, meta)
+
         if client_fingerprint and client_fingerprint not in bundle_index:
             bundle_index[client_fingerprint] = bundle_id
             save_index(bundle_index)
@@ -405,25 +443,25 @@ class Handler(BaseHTTPRequestHandler):
         NOTIFY_FILE.write_text(f'{response_path}\n{now_iso()}\n', encoding='utf-8')
 
         # ロブ🦞にagent turn通知（Telegram経由）— 同じlabelは5分に1回に制限
+        sf_count = len([sf for sf in sandbox_files if sf.get('content')]) if isinstance(sandbox_files, list) else 0
         _now_epoch = int(time.time())
         _last_notify = getattr(self.__class__, '_notify_history', {})
         _last_time = _last_notify.get(label, 0)
         if _now_epoch - _last_time >= 300:  # 5分throttle
+            _sf_info = f' / 📄Canvas: {sf_count}ファイル' if sf_count > 0 else ''
             _notify_msg = (
                 f'📥 😎スーパーメガネから返答が来た。以下を実行しろ:\n'
                 f'1. cat {response_path} で中身を読め\n'
                 f'2. コードが含まれてたら該当ファイルに配置しろ\n'
                 f'3. テストがあれば実行しろ\n'
                 f'4. 結果をやまちゃん🗻にTelegramで報告しろ\n'
-                f'bundle: {bundle_id} / {len(text)}文字 / label: {label}'
+                f'bundle: {bundle_id} / {len(text)}文字 / label: {label}{_sf_info}'
             )
             try:
                 subprocess.Popen(
                     ['openclaw', 'agent',
                      '--channel', 'telegram',
-                     '--to', '8596625967',
-                     '--message', _notify_msg,
-                     '--timeout', '120'],  # --deliver外し: やまちゃんに飛ばさない
+                     '--message', _notify_msg],
                     cwd=str(REPO),
                     stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
                 )
