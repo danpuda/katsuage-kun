@@ -442,12 +442,17 @@ class Handler(BaseHTTPRequestHandler):
         )
         NOTIFY_FILE.write_text(f'{response_path}\n{now_iso()}\n', encoding='utf-8')
 
-        # ロブ🦞にagent turn通知（Telegram経由）— 同じlabelは5分に1回に制限
+        # ロブ🦞にagent turn通知（Telegram経由）
+        # v7.5.1修正: 短い応答(500文字未満)は通知しない + 長い応答はthrottleバイパス
         sf_count = len([sf for sf in sandbox_files if sf.get('content')]) if isinstance(sandbox_files, list) else 0
+        _MIN_NOTIFY_LEN = 500  # これ未満はゴミ応答として通知スキップ
         _now_epoch = int(time.time())
         _last_notify = getattr(self.__class__, '_notify_history', {})
         _last_time = _last_notify.get(label, 0)
-        if _now_epoch - _last_time >= 300:  # 5分throttle
+        _last_len = getattr(self.__class__, '_notify_last_len', {}).get(label, 0)
+        # 通知条件: (1)テキスト500文字以上 AND (2)throttle経過 OR 前回より大幅に長い応答
+        _len_jump = len(text) > max(_last_len * 2, _MIN_NOTIFY_LEN)  # 前回の2倍以上 = 本命
+        if len(text) >= _MIN_NOTIFY_LEN and (_now_epoch - _last_time >= 60 or _len_jump):  # 60秒throttle
             _sf_info = f' / 📄Canvas: {sf_count}ファイル' if sf_count > 0 else ''
             _notify_msg = (
                 f'📥 😎スーパーメガネから返答が来た。以下を実行しろ:\n'
@@ -469,11 +474,17 @@ class Handler(BaseHTTPRequestHandler):
                 )
                 _last_notify[label] = _now_epoch
                 self.__class__._notify_history = _last_notify
-                print(f'🔔 agent turn起動: {label}', flush=True)
+                _len_history = getattr(self.__class__, '_notify_last_len', {})
+                _len_history[label] = len(text)
+                self.__class__._notify_last_len = _len_history
+                print(f'🔔 agent turn起動: {label} ({len(text)}文字)', flush=True)
             except Exception as _e:
                 print(f'⚠️ agent turn起動失敗: {_e}', flush=True)
+        elif len(text) < _MIN_NOTIFY_LEN:
+            print(f'⏭ 通知スキップ(短文): {label} ({len(text)}文字 < {_MIN_NOTIFY_LEN})', flush=True)
         else:
-            print(f'⏭ 通知throttle: {label} (残{300-(_now_epoch-_last_time)}秒)', flush=True)
+            _remain = max(0, 60 - (_now_epoch - _last_time))
+            print(f'⏭ 通知throttle: {label} (残{_remain}秒, {len(text)}文字)', flush=True)
 
         self._send_json(200, {
             'ok': True,
