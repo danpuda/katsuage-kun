@@ -1,4 +1,4 @@
-# 😈 カツアゲくん (katsuage-kun)
+# 😈 ChatGPT WebUI カツアゲくん (katsuage-kun)
 
 > ChatGPT WebUIから出力をカツアゲして、WSLに自動保存するツール
 
