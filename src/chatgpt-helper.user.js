@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         GPT54-Scholar Helper v7
 // @namespace    https://github.com/danpuda
-// @version      7.3.0
+// @version      7.4.0
 // @description  ChatGPT返答と添付ファイル参照を安定検知し、既存メッセージ再送を防いでWSLサーバーへ保存する
 // @author       Rob🦞 & Yama🗻
 // @match        https://chatgpt.com/*
@@ -15,7 +15,7 @@
 (function () {
     'use strict';
 
-    const VERSION = '7.3.0';
+    const VERSION = '7.4.0';
     const ROB_SERVER = 'http://127.0.0.1:8854';
     const ROB_TOKEN = 'scholar-v4-rob';
 
@@ -69,7 +69,8 @@
     ];
 
     const STOP_BUTTON_RE = /(stop|停止|中止|stop generating|stop streaming)/i;
-    const REGENERATE_BUTTON_RE = /(regenerate|再生成|やり直し|retry)/i;
+    // v7.4: ChatGPT 5.4 Thinking UI対応 — 「モデルを切り替える」ボタンも完了判定に使用
+    const REGENERATE_BUTTON_RE = /(regenerate|再生成|やり直し|retry|モデルを切り替え|switch model|良い回答|良くない回答|good response|bad response)/i;
     const DOWNLOAD_HINT_RE = /(sandbox:|blob:|\/download\b|\/files\b|attachment|artifact|mnt\/data\/|\.(txt|md|pdf|csv|tsv|json|js|ts|py|ipynb|zip|tar|gz|png|jpg|jpeg|webp|svg|docx|pptx|xlsx))(\?|#|$)/i;
 
     let observer = null;
@@ -1224,6 +1225,13 @@
                 lastDetectAt = nowMs();
                 log('poll-complete', `idle=${nowMs() - lastMutationAt}ms evaluate`);
                 scheduleEvaluation('poll-generation-complete');
+            }
+
+            // v7.4: 短い回答の取りこぼし防止 — 生成完了後にtrue→false遷移を
+            // 見逃した場合でも、idle時間経過でevaluateをトリガー
+            if (!generatingNow && (nowMs() - lastMutationAt) > COMPLETE_IDLE_MS && (nowMs() - lastMutationAt) < POLL_MS * 2) {
+                log('poll-idle-catch', `idle=${nowMs() - lastMutationAt}ms — missed transition, evaluate`);
+                scheduleEvaluation('poll-idle-catch');
             }
 
             lastPollGenerating = generatingNow;
