@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         GPT54-Scholar Helper v7
 // @namespace    https://github.com/danpuda
-// @version      7.1.0
+// @version      7.2.0
 // @description  ChatGPT返答と添付ファイル参照を安定検知し、既存メッセージ再送を防いでWSLサーバーへ保存する
 // @author       Rob🦞 & Yama🗻
 // @match        https://chatgpt.com/*
@@ -469,7 +469,7 @@
     }
 
     function isGeneratingNow() {
-        if (hasStopButton()) return true;
+        if (cachedStopButton) return true; // v7.2: キャッシュ値を使用（DOM直叩き回避）
 
         const latest = getLatestAssistantMessage();
         if (latest && latest.querySelector(BUSY_SELECTORS.join(','))) return true;
@@ -875,7 +875,7 @@
 
             const generating = isGeneratingNow();
             const latest = getLatestAssistantMessage();
-            const regenerate = hasRegenerateButton();
+            const regenerate = cachedRegenerateButton; // v7.2: キャッシュ値を使用（DOM直叩き回避）
 
             if (generating) {
                 const age = nowMs() - lastMutationAt;
@@ -1183,11 +1183,13 @@
         observer.observe(target, {
             childList: true,
             subtree: true,
-            characterData: true,
-            attributes: true,
-            attributeFilter: ['class', 'href', 'aria-label', 'data-state', 'disabled', 'aria-busy']
+            characterData: false, // v7.2: CPU負荷軽減（childListだけで新メッセージ検出は十分）
+            attributes: false,   // v7.2: CPU負荷軽減（attributeFilter不要に）
         });
 
+        // v7.2: キャッシュを先に初期化（isGeneratingNow()がキャッシュ参照するため）
+        cachedStopButton = hasStopButton();
+        cachedRegenerateButton = hasRegenerateButton();
         lastPollGenerating = isGeneratingNow();
         pollTimer = setInterval(() => {
             const generatingNow = isGeneratingNow();
