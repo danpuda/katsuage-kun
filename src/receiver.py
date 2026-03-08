@@ -640,6 +640,15 @@ class Handler(BaseHTTPRequestHandler):
         print(f'✅ {datetime.now().strftime("%H:%M:%S")} inject acked: {inject_id}', flush=True)
         self._send_json(200, {'ok': True, 'inject_id': inject_id, 'acked': True})
 
+    def handle(self) -> None:
+        """v7.5.3: BrokenPipeError でサーバーがクラッシュしないようにする"""
+        try:
+            super().handle()
+        except BrokenPipeError:
+            print(f'⚠️ {datetime.now().strftime("%H:%M:%S")} BrokenPipe (client disconnected)', flush=True)
+        except ConnectionResetError:
+            print(f'⚠️ {datetime.now().strftime("%H:%M:%S")} ConnectionReset (client disconnected)', flush=True)
+
     def log_message(self, fmt: str, *args: Any) -> None:
         # 標準ログは抑制。必要なイベントは自前で print する。
         return
