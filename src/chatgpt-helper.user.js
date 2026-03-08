@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         GPT54-Scholar Helper v7
 // @namespace    https://github.com/danpuda
-// @version      7.1.0
+// @version      7.3.0
 // @description  ChatGPT返答と添付ファイル参照を安定検知し、既存メッセージ再送を防いでWSLサーバーへ保存する
 // @author       Rob🦞 & Yama🗻
 // @match        https://chatgpt.com/*
@@ -15,11 +15,12 @@
 (function () {
     'use strict';
 
-    const VERSION = '7.1.0';
+    const VERSION = '7.3.0';
     const ROB_SERVER = 'http://127.0.0.1:8854';
     const ROB_TOKEN = 'scholar-v4-rob';
 
     const CAPTURE_ALL_NEW = true;
+    const MAX_EVAL_MESSAGES = 5;
     const MIN_TEXT_LEN = 20;
     const MAX_FILE_BYTES = 25 * 1024 * 1024;
 
@@ -469,7 +470,7 @@
     }
 
     function isGeneratingNow() {
-        if (hasStopButton()) return true;
+        if (cachedStopButton) return true; // v7.2: キャッシュ値を使用（DOM直叩き回避）
 
         const latest = getLatestAssistantMessage();
         if (latest && latest.querySelector(BUSY_SELECTORS.join(','))) return true;
@@ -705,17 +706,22 @@
     }
 
     async function buildSnapshots() {
-        const records = getAssistantRecords();
-        if (!records.length) return [];
+        const allRecords = getAssistantRecords();
+        if (!allRecords.length) return [];
+
+        const total = allRecords.length;
+        const targetRecords = CAPTURE_ALL_NEW
+            ? allRecords.slice(-MAX_EVAL_MESSAGES)
+            : allRecords.slice(-1);
 
         const snapshots = [];
-        for (const record of records) {
-            const snapshot = await buildSnapshotForRecord(record, records.length);
+        for (const record of targetRecords) {
+            const snapshot = await buildSnapshotForRecord(record, total);
             if (!snapshot.text || snapshot.text.length < MIN_TEXT_LEN) continue;
             snapshots.push(snapshot);
         }
 
-        return CAPTURE_ALL_NEW ? snapshots : snapshots.slice(-1);
+        return snapshots;
     }
 
     function shouldSendSnapshot(snapshot) {
@@ -875,7 +881,7 @@
 
             const generating = isGeneratingNow();
             const latest = getLatestAssistantMessage();
-            const regenerate = hasRegenerateButton();
+            const regenerate = cachedRegenerateButton; // v7.2: キャッシュ値を使用（DOM直叩き回避）
 
             if (generating) {
                 const age = nowMs() - lastMutationAt;
@@ -1153,7 +1159,14 @@
             clearInterval(pollTimer);
             pollTimer = null;
         }
+        if (debounceTimer) {
+            clearTimeout(debounceTimer);
+            debounceTimer = null;
+        }
         watchTarget = null;
+        cachedStopButton = false;
+        cachedRegenerateButton = false;
+        lastPollGenerating = null;
     }
 
     function startWatching(reason) {
@@ -1169,8 +1182,15 @@
                 const nodes = [m.target, ...Array.from(m.addedNodes || [])];
                 return nodes.some((node) => {
                     if (!(node instanceof Element)) return false;
-                    if (looksLikeAssistantMessage(node)) return true;
-                    return !!node.closest('[data-message-author-role="assistant"], article, [role="article"]');
+
+                    const assistantContainer = node.matches('[data-message-author-role="assistant"], article, [role="article"]')
+                        ? node
+                        : node.closest('[data-message-author-role="assistant"], article, [role="article"]');
+
+                    if (!assistantContainer) return false;
+                    if (assistantContainer.getAttribute('data-message-author-role') === 'assistant') return true;
+
+                    return looksLikeAssistantMessage(assistantContainer);
                 });
             });
 
@@ -1183,13 +1203,17 @@
         observer.observe(target, {
             childList: true,
             subtree: true,
-            characterData: true,
-            attributes: true,
-            attributeFilter: ['class', 'href', 'aria-label', 'data-state', 'disabled', 'aria-busy']
+            characterData: false, // v7.2: CPU負荷軽減（childListだけで新メッセージ検出は十分）
+            attributes: false,   // v7.2: CPU負荷軽減（attributeFilter不要に）
         });
 
+        // v7.3: キャッシュを先に初期化（isGeneratingNow()がキャッシュ参照するため）
+        cachedStopButton = hasStopButton();
+        cachedRegenerateButton = hasRegenerateButton();
         lastPollGenerating = isGeneratingNow();
         pollTimer = setInterval(() => {
+            cachedStopButton = hasStopButton();
+            cachedRegenerateButton = hasRegenerateButton();
             const generatingNow = isGeneratingNow();
 
             if (generatingNow !== lastPollGenerating) {
@@ -1203,8 +1227,6 @@
             }
 
             lastPollGenerating = generatingNow;
-            cachedStopButton = hasStopButton();
-            cachedRegenerateButton = hasRegenerateButton();
             renderPanel();
         }, POLL_MS);
 
