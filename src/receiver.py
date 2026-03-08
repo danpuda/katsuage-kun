@@ -460,6 +460,8 @@ class Handler(BaseHTTPRequestHandler):
             try:
                 subprocess.Popen(
                     ['openclaw', 'agent',
+                     '--agent', 'main',
+                     '--deliver',
                      '--channel', 'telegram',
                      '--message', _notify_msg],
                     cwd=str(REPO),
