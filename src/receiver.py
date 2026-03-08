@@ -463,12 +463,12 @@ class Handler(BaseHTTPRequestHandler):
                 f'bundle: {bundle_id} / {len(text)}文字 / label: {label}{_sf_info}'
             )
             try:
+                # v7.5.1: system event --mode now でロブ🦞を即起床
+                # (サブエージェント完了通知と同じ仕組み — 確実に1分以内に反応)
                 subprocess.Popen(
-                    ['openclaw', 'agent',
-                     '--agent', 'main',
-                     '--deliver',
-                     '--channel', 'telegram',
-                     '--message', _notify_msg],
+                    ['openclaw', 'system', 'event',
+                     '--text', _notify_msg,
+                     '--mode', 'now'],
                     cwd=str(REPO),
                     stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
                 )
