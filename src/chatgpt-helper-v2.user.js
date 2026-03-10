@@ -18,7 +18,6 @@
  const POLL_MS = 1000;
 
  let prevBusy = false;
- let lastAssistantNode = null;
 
  function normalize(text) {
  return String(text || '').replace(/\r/g, '').replace(/\u00a0/g, ' ').trim();
@@ -53,7 +52,7 @@
  }
 
  function getAssistantMessages() {
- return Array.from(document.querySelectorAll('[data-message-author-role="assistant"], article[data-message-author-role="assistant"]'));
+ return Array.from(document.querySelectorAll('[data-message-author-role="assistant"]'));
  }
 
  function getLatestAssistantMessage() {
@@ -99,7 +98,6 @@
  if (!node) return;
  const text = extractAssistantText(node);
  if (!text) return;
- lastAssistantNode = node;
  sendPayload({
  text,
  label: getLabel(),
@@ -110,8 +108,6 @@
 
  function tick() {
  const busy = isBusy();
- const latest = getLatestAssistantMessage();
- if (latest) lastAssistantNode = latest;
  if (prevBusy && !busy) {
  maybeSendCompletedMessage();
  }

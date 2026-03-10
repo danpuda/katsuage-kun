@@ -15,7 +15,10 @@ SAVE_ROOT = REPO / "docs" / "gpt54-responses"
 TOKEN = os.environ.get("GPT54_TOKEN", "scholar-v4-rob")
 ALLOWED_ORIGINS = {"https://chatgpt.com", "https://chat.openai.com"}
 MAX_BODY_BYTES = 2 * 1024 * 1024
-OPENCLAW_PATH = "/home/yama/.nvm/versions/node/v22.22.0/bin/openclaw"
+OPENCLAW_PATH = os.environ.get(
+    "GPT54_OPENCLAW_PATH",
+    "/home/yama/.nvm/versions/node/v22.22.0/bin/openclaw",
+)
 
 
 def sanitize_label(value: str) -> str:
@@ -45,14 +48,15 @@ def read_json_request(handler: BaseHTTPRequestHandler, max_bytes: int) -> dict:
 
 
 def unique_dir(base: Path) -> Path:
-    if not base.exists():
-        return base
+    candidate = base
     counter = 2
     while True:
-        candidate = base.with_name(f"{base.name}-{counter}")
-        if not candidate.exists():
+        try:
+            candidate.mkdir(parents=True, exist_ok=False)
             return candidate
-        counter += 1
+        except FileExistsError:
+            candidate = base.with_name(f"{base.name}-{counter}")
+            counter += 1
 
 
 def render_markdown(*, label: str, saved_at: str, captured_at: str, source_url: str, text: str) -> str:
@@ -102,7 +106,7 @@ class Handler(BaseHTTPRequestHandler):
 
     def _allow_origin(self) -> str:
         origin = self.headers.get("Origin", "")
-        return origin if origin in ALLOWED_ORIGINS else "https://chatgpt.com"
+        return origin if origin in ALLOWED_ORIGINS else "null"
 
     def _send_json(self, status: int, payload: dict) -> None:
         body = json.dumps(payload, ensure_ascii=False).encode("utf-8")
@@ -169,7 +173,6 @@ class Handler(BaseHTTPRequestHandler):
         saved_at = now.isoformat(timespec="seconds")
         dir_name = f"{now.strftime('%Y%m%d-%H%M%S')}-{label}"
         bundle_dir = unique_dir(SAVE_ROOT / dir_name)
-        bundle_dir.mkdir(parents=True, exist_ok=False)
 
         response_path = bundle_dir / "response.md"
         response_path.write_text(
