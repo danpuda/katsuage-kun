@@ -20,7 +20,7 @@
  let prevBusy = false;
  let tickCount = 0;
  let idleConfirmCount = 0;
- const IDLE_CONFIRM_TICKS = 2; // require 2 consecutive idle ticks before sending
+ const IDLE_CONFIRM_TICKS = 2; // 1 extra tick after transition (1s at POLL_MS=1000)
 
  function normalize(text) {
    return String(text || '').replace(/\r/g, '').replace(/\u00a0/g, ' ').trim();
@@ -32,8 +32,8 @@
    const byTestId = document.querySelector('button[data-testid="stop-button"]');
    if (byTestId) return true;
    // Selector 2: aria-label exact patterns (fallback)
-   // Restrict to form area to avoid false positives from unrelated buttons
-   const form = document.querySelector('form, [role="presentation"]');
+   // Restrict to form area only — [role="presentation"] is too broad
+   const form = document.querySelector('form');
    if (!form) return false;
    const buttons = form.querySelectorAll('button[aria-label]');
    for (const btn of buttons) {
