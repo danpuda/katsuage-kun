@@ -103,16 +103,21 @@
    saveQueue(q);
    console.log('[v2] 📦 Queued for retry. Queue size:', q.length);
  }
+ let isSending = false; // prevent overlapping sends (RETRY_MS < timeout)
  function processQueue() {
+   if (isSending) return;
    const q = getQueue();
    if (!q.length) return;
+   isSending = true;
    const item = q[0];
    doSend(item.payload, () => {
+     isSending = false;
      q.shift();
      saveQueue(q);
      console.log('[v2] ✅ Retry success! Remaining:', q.length);
      if (q.length) setTimeout(processQueue, 1000); // drain next
    }, () => {
+     isSending = false;
      item.retries++;
      if (item.retries >= 10) {
        q.shift();
