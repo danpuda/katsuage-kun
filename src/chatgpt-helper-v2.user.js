@@ -99,7 +99,10 @@
  function enqueue(payload) {
    const q = getQueue();
    q.push({ payload, retries: 0, enqueuedAt: Date.now() });
-   if (q.length > MAX_QUEUE) q.shift();
+   if (q.length > MAX_QUEUE) {
+     const dropped = q.shift();
+     console.warn('[v2] ⚠️ Queue full, dropped oldest:', dropped.payload?.label);
+   }
    saveQueue(q);
    console.log('[v2] 📦 Queued for retry. Queue size:', q.length);
  }
