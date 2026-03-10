@@ -5,7 +5,9 @@ import json
 import os
 import re
 from datetime import datetime
+import socket
 from http.server import BaseHTTPRequestHandler, HTTPServer
+from socketserver import ThreadingMixIn
 from pathlib import Path
 
 HOST = "127.0.0.1"
@@ -27,6 +29,9 @@ def sanitize_label(value: str) -> str:
     return value[:80] or "chatgpt"
 
 
+READ_TIMEOUT_SEC = 10  # Bug #4: prevent hang on Content-Length mismatch
+
+
 def read_json_request(handler: BaseHTTPRequestHandler, max_bytes: int) -> dict:
     raw_len = handler.headers.get("Content-Length", "0")
     try:
@@ -37,7 +42,15 @@ def read_json_request(handler: BaseHTTPRequestHandler, max_bytes: int) -> dict:
         raise ValueError("empty request body")
     if length > max_bytes:
         raise OverflowError(f"request too large: {length} > {max_bytes}")
-    raw = handler.rfile.read(length)
+    # Bug #4 fix: set socket timeout to prevent hang on Content-Length mismatch
+    old_timeout = handler.connection.gettimeout()
+    handler.connection.settimeout(READ_TIMEOUT_SEC)
+    try:
+        raw = handler.rfile.read(length)
+    except socket.timeout as exc:
+        raise ValueError("read timeout: client sent less data than Content-Length") from exc
+    finally:
+        handler.connection.settimeout(old_timeout)
     try:
         data = json.loads(raw.decode("utf-8"))
     except json.JSONDecodeError as exc:
@@ -106,16 +119,16 @@ def notify_rob(label: str, text_len: int, text_preview: str, save_path: str,
              '--target', '8596625967', '--message', msg],
             stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
         )
-    except Exception:
-        pass
+    except Exception as e:
+        print(f"⚠️ notify_rob telegram failed: {e}", flush=True)
     # system event（ロブのセッションに届く）
     try:
         subprocess.Popen(
             [OPENCLAW_PATH, 'system', 'event', '--text', msg, '--mode', 'now'],
             stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
         )
-    except Exception:
-        pass
+    except Exception as e:
+        print(f"⚠️ notify_rob system event failed: {e}", flush=True)
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -141,8 +154,9 @@ class Handler(BaseHTTPRequestHandler):
 
     def _check_origin(self) -> None:
         origin = self.headers.get("Origin")
-        if origin and origin not in ALLOWED_ORIGINS:
-            raise PermissionError(f"origin not allowed: {origin}")
+        # Bug #8 fix: reject requests with no Origin header too
+        if origin not in ALLOWED_ORIGINS:
+            raise PermissionError(f"origin not allowed: {origin!r}")
 
     def _check_token(self) -> None:
         token = self.headers.get("X-Rob-Token", "")
@@ -150,16 +164,19 @@ class Handler(BaseHTTPRequestHandler):
             raise PermissionError("invalid X-Rob-Token")
 
     def do_OPTIONS(self) -> None:
-        try:
-            self._check_origin()
-        except PermissionError as exc:
-            self._send_json(403, {"ok": False, "error": str(exc)})
-            return
+        # CORS preflight — lenient on origin (browser needs this to work)
         self.send_response(200)
         self.send_header("Access-Control-Allow-Origin", self._allow_origin())
         self.send_header("Access-Control-Allow-Methods", "POST, OPTIONS")
         self.send_header("Access-Control-Allow-Headers", "Content-Type, X-Rob-Token")
         self.end_headers()
+
+    def do_GET(self) -> None:
+        # Bug #5: health endpoint for watchdog
+        if self.path == "/health":
+            self._send_json(200, {"ok": True, "status": "healthy"})
+            return
+        self._send_json(404, {"ok": False, "error": "not found"})
 
     def do_POST(self) -> None:
         try:
@@ -189,7 +206,11 @@ class Handler(BaseHTTPRequestHandler):
         source_url = str(body.get("source_url", "")).strip()
         captured_at = str(body.get("captured_at", "")).strip()
         has_file = bool(body.get("has_file", False))
-        file_names = body.get("file_names", [])
+        # Bug #9 fix: validate file_names type and sanitize
+        raw_files = body.get("file_names", [])
+        if not isinstance(raw_files, list):
+            raw_files = []
+        file_names = [str(f)[:256] for f in raw_files[:20] if isinstance(f, (str, int, float))]
 
         now = datetime.now()
         saved_at = now.isoformat(timespec="seconds")
@@ -234,10 +255,15 @@ class Handler(BaseHTTPRequestHandler):
         self._send_json(200, {"ok": True, "path": str(response_path)})
 
 
+class ThreadedHTTPServer(ThreadingMixIn, HTTPServer):
+    """Bug #4: prevent single slow request from blocking all others."""
+    daemon_threads = True
+
+
 def main() -> None:
     SAVE_ROOT.mkdir(parents=True, exist_ok=True)
-    with HTTPServer((HOST, PORT), Handler) as server:
-        print(f"🦞 GPT54 Receiver v2 | {HOST}:{PORT} | save={SAVE_ROOT}", flush=True)
+    with ThreadedHTTPServer((HOST, PORT), Handler) as server:
+        print(f"🦞 GPT54 Receiver v2.1 | {HOST}:{PORT} | save={SAVE_ROOT} | threaded", flush=True)
         server.serve_forever()
 
 
