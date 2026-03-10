@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name chatgpt-helper-v2
 // @namespace local
-// @version 2.3.0
+// @version 2.4.0
 // @description Capture completed ChatGPT assistant messages
 // @match https://chatgpt.com/*
 // @match https://chat.openai.com/*
@@ -47,6 +47,23 @@
    return normalize(content.innerText || content.textContent || '');
  }
 
+ function detectFiles(node) {
+   if (!node) return [];
+   const buttons = node.querySelectorAll('button');
+   const files = [];
+   for (const btn of buttons) {
+     const t = (btn.textContent || '').trim();
+     // Japanese: "filename をダウンロード" / English: "Download filename"
+     if (t.includes('をダウンロード')) {
+       files.push(t.replace(' をダウンロード', ''));
+     } else if (t.toLowerCase().startsWith('download ')) {
+       files.push(t.substring(9));
+     }
+   }
+   if (files.length) console.log('[v2] 📎 Files detected:', files);
+   return files;
+ }
+
  function getLabel() {
    const parts = location.pathname.split('/').filter(Boolean);
    return normalize(parts[parts.length - 1] || document.title || 'chatgpt');
@@ -72,12 +89,18 @@
    if (!node) return;
    const text = extractAssistantText(node);
    if (!text) return;
-   sendPayload({
+   const files = detectFiles(node);
+   const payload = {
      text,
      label: getLabel(),
      source_url: location.href.split('#')[0],
      captured_at: new Date().toISOString()
-   });
+   };
+   if (files.length) {
+     payload.has_file = true;
+     payload.file_names = files;
+   }
+   sendPayload(payload);
  }
 
  function tick() {
@@ -94,6 +117,6 @@
    prevBusy = busy;
  }
 
- console.log('[v2] 🦞 v2.3.0 LOADED (stop button: aria includes check)');
+ console.log('[v2] 🦞 v2.4.0 LOADED (file detection + stop button aria check)');
  setInterval(tick, POLL_MS);
 })();

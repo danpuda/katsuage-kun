@@ -75,21 +75,30 @@ def render_markdown(*, label: str, saved_at: str, captured_at: str, source_url: 
     return "\n".join(lines)
 
 
-def render_meta(*, label: str, saved_at: str, captured_at: str, source_url: str, path: Path) -> dict:
-    return {
+def render_meta(*, label: str, saved_at: str, captured_at: str, source_url: str, path: Path,
+                has_file: bool = False, file_names: list = None) -> dict:
+    meta = {
         "label": label,
         "saved_at": saved_at,
         "captured_at": captured_at,
         "source_url": source_url,
         "response_path": str(path),
     }
+    if has_file:
+        meta["has_file"] = True
+        meta["file_names"] = file_names or []
+    return meta
 
 
-def notify_rob(label: str, text_len: int, text_preview: str, save_path: str) -> None:
+def notify_rob(label: str, text_len: int, text_preview: str, save_path: str,
+               has_file: bool = False, file_names: list = None) -> None:
     """ロブ🦞にTelegram通知 + system event（失敗しても無視）"""
     import subprocess
     preview = text_preview[:80].replace('\n', ' ')
-    msg = f"📥 GPT回答キャプチャ\n📝 {text_len}文字 | {label}\n💬 {preview}…\n📂 {save_path}"
+    file_line = ""
+    if has_file and file_names:
+        file_line = f"\n📎 ファイル添付: {', '.join(file_names)}"
+    msg = f"📥 GPT回答キャプチャ\n📝 {text_len}文字 | {label}\n💬 {preview}…{file_line}\n📂 {save_path}"
     # Telegram通知（やまちゃん+ロブに見える）
     try:
         subprocess.Popen(
@@ -179,6 +188,8 @@ class Handler(BaseHTTPRequestHandler):
         label = sanitize_label(body.get("label", ""))
         source_url = str(body.get("source_url", "")).strip()
         captured_at = str(body.get("captured_at", "")).strip()
+        has_file = bool(body.get("has_file", False))
+        file_names = body.get("file_names", [])
 
         now = datetime.now()
         saved_at = now.isoformat(timespec="seconds")
@@ -206,6 +217,8 @@ class Handler(BaseHTTPRequestHandler):
                     captured_at=captured_at,
                     source_url=source_url,
                     path=response_path,
+                    has_file=has_file,
+                    file_names=file_names,
                 ),
                 ensure_ascii=False,
                 indent=2,
@@ -215,7 +228,9 @@ class Handler(BaseHTTPRequestHandler):
         )
 
         print(f"📥 saved: {response_path} ({len(text)}文字)", flush=True)
-        notify_rob(label, len(text), text, str(bundle_dir))
+        if has_file:
+            print(f"📎 files: {file_names}", flush=True)
+        notify_rob(label, len(text), text, str(bundle_dir), has_file, file_names)
         self._send_json(200, {"ok": True, "path": str(response_path)})
 
 
