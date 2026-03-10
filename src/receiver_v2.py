@@ -85,11 +85,22 @@ def render_meta(*, label: str, saved_at: str, captured_at: str, source_url: str,
     }
 
 
-def notify_rob(label: str, text_len: int) -> None:
-    """ロブ🦞にsystem event通知（失敗しても無視）"""
+def notify_rob(label: str, text_len: int, text_preview: str, save_path: str) -> None:
+    """ロブ🦞にTelegram通知 + system event（失敗しても無視）"""
     import subprocess
+    preview = text_preview[:80].replace('\n', ' ')
+    msg = f"📥 GPT回答キャプチャ\n📝 {text_len}文字 | {label}\n💬 {preview}…\n📂 {save_path}"
+    # Telegram通知（やまちゃん+ロブに見える）
     try:
-        msg = f"📥 GPT回答キャプチャ: {label} ({text_len}文字)"
+        subprocess.Popen(
+            [OPENCLAW_PATH, 'message', 'send', '--channel', 'telegram',
+             '--target', '8596625967', '--message', msg],
+            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+        )
+    except Exception:
+        pass
+    # system event（ロブのセッションに届く）
+    try:
         subprocess.Popen(
             [OPENCLAW_PATH, 'system', 'event', '--text', msg, '--mode', 'now'],
             stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
@@ -204,7 +215,7 @@ class Handler(BaseHTTPRequestHandler):
         )
 
         print(f"📥 saved: {response_path} ({len(text)}文字)", flush=True)
-        notify_rob(label, len(text))
+        notify_rob(label, len(text), text, str(bundle_dir))
         self._send_json(200, {"ok": True, "path": str(response_path)})
 
 
