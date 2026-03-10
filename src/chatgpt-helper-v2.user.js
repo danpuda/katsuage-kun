@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name chatgpt-helper-v2
 // @namespace local
-// @version 2.6.0
+// @version 2.7.0
 // @description Capture completed ChatGPT assistant messages
 // @match https://chatgpt.com/*
 // @match https://chat.openai.com/*
@@ -16,6 +16,9 @@
  const SERVER_URL = 'http://127.0.0.1:8854/response';
  const TOKEN = 'scholar-v4-rob';
  const POLL_MS = 1000;
+ const QUEUE_KEY = 'katsuage-retry-queue';
+ const MAX_QUEUE = 20;
+ const RETRY_MS = 10000; // retry every 10s
 
  let prevBusy = false;
  let tickCount = 0;
@@ -85,18 +88,59 @@
    return normalize(parts[parts.length - 1] || document.title || 'chatgpt');
  }
 
- function sendPayload(payload) {
-   console.log('[v2] 🚀 SENDING:', payload.text.substring(0, 100));
+ // --- Retry Queue (Bug #3 fix) ---
+ function getQueue() {
+   try { return JSON.parse(localStorage.getItem(QUEUE_KEY) || '[]'); }
+   catch { return []; }
+ }
+ function saveQueue(q) {
+   localStorage.setItem(QUEUE_KEY, JSON.stringify(q));
+ }
+ function enqueue(payload) {
+   const q = getQueue();
+   q.push({ payload, retries: 0, enqueuedAt: Date.now() });
+   if (q.length > MAX_QUEUE) q.shift();
+   saveQueue(q);
+   console.log('[v2] 📦 Queued for retry. Queue size:', q.length);
+ }
+ function processQueue() {
+   const q = getQueue();
+   if (!q.length) return;
+   const item = q[0];
+   doSend(item.payload, () => {
+     q.shift();
+     saveQueue(q);
+     console.log('[v2] ✅ Retry success! Remaining:', q.length);
+     if (q.length) setTimeout(processQueue, 1000); // drain next
+   }, () => {
+     item.retries++;
+     if (item.retries >= 10) {
+       q.shift();
+       console.error('[v2] ❌ Dropped after 10 retries:', item.payload.label);
+     }
+     saveQueue(q);
+   });
+ }
+
+ function doSend(payload, onOk, onFail) {
    GM_xmlhttpRequest({
      method: 'POST',
      url: SERVER_URL,
      headers: { 'Content-Type': 'application/json', 'X-Rob-Token': TOKEN },
      data: JSON.stringify(payload),
      timeout: 30000,
-     onload: (res) => console.log('[v2] ✅', res.status, res.responseText),
-     ontimeout: () => console.error('[v2] ❌ TIMEOUT'),
-     onerror: (err) => console.error('[v2] ❌ ERROR', err)
+     onload: (res) => {
+       console.log('[v2] ✅', res.status, res.responseText);
+       if (onOk) onOk();
+     },
+     ontimeout: () => { console.error('[v2] ❌ TIMEOUT'); if (onFail) onFail(); },
+     onerror: (err) => { console.error('[v2] ❌ ERROR', err); if (onFail) onFail(); }
    });
+ }
+
+ function sendPayload(payload) {
+   console.log('[v2] 🚀 SENDING:', payload.text.substring(0, 100));
+   doSend(payload, null, () => enqueue(payload));
  }
 
  function maybeSendCompletedMessage() {
@@ -143,6 +187,7 @@
    prevBusy = busy;
  }
 
- console.log('[v2] 🦞 v2.6.0 LOADED (isBusy hardened + idle confirm + multi-file)');
+ console.log('[v2] 🦞 v2.7.0 LOADED (retry queue + isBusy hardened + idle confirm + multi-file)');
  setInterval(tick, POLL_MS);
+ setInterval(processQueue, RETRY_MS);
 })();
