@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name chatgpt-helper-v2
 // @namespace local
-// @version 2.4.0
+// @version 2.5.0
 // @description Capture completed ChatGPT assistant messages
 // @match https://chatgpt.com/*
 // @match https://chat.openai.com/*
@@ -49,15 +49,22 @@
 
  function detectFiles(node) {
    if (!node) return [];
-   const buttons = node.querySelectorAll('button');
+   const buttons = node.querySelectorAll('button.behavior-btn');
    const files = [];
    for (const btn of buttons) {
      const t = (btn.textContent || '').trim();
-     // Japanese: "filename をダウンロード" / English: "Download filename"
+     const parent = btn.parentElement;
+     const isFileBtn = parent && parent.tagName === 'SPAN' && parent.dataset.state === 'closed';
+     if (!isFileBtn) continue;
+     // Pattern 1: "filename をダウンロード" (single file)
      if (t.includes('をダウンロード')) {
        files.push(t.replace(' をダウンロード', ''));
+     // Pattern 2: "Download filename" (English)
      } else if (t.toLowerCase().startsWith('download ')) {
        files.push(t.substring(9));
+     // Pattern 3: Just filename with extension (multiple files)
+     } else if (/\.\w{1,10}$/.test(t) && !t.includes(' ')) {
+       files.push(t);
      }
    }
    if (files.length) console.log('[v2] 📎 Files detected:', files);
@@ -117,6 +124,6 @@
    prevBusy = busy;
  }
 
- console.log('[v2] 🦞 v2.4.0 LOADED (file detection + stop button aria check)');
+ console.log('[v2] 🦞 v2.5.0 LOADED (multi-file detection + behavior-btn pattern)');
  setInterval(tick, POLL_MS);
 })();
