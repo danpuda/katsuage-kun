@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name chatgpt-helper-v2
 // @namespace local
-// @version 2.5.0
+// @version 2.6.0
 // @description Capture completed ChatGPT assistant messages
 // @match https://chatgpt.com/*
 // @match https://chat.openai.com/*
@@ -19,18 +19,27 @@
 
  let prevBusy = false;
  let tickCount = 0;
+ let idleConfirmCount = 0;
+ const IDLE_CONFIRM_TICKS = 2; // 1 extra tick after transition (1s at POLL_MS=1000)
 
  function normalize(text) {
    return String(text || '').replace(/\r/g, '').replace(/\u00a0/g, ' ').trim();
  }
 
  function isBusy() {
-   // aria-label includes check (handles "ストリーミングの停止", "Stop streaming", etc.)
-   const buttons = document.querySelectorAll('button[aria-label]');
+   // Strategy: look for the stop button near the chat input form
+   // Selector 1: data-testid (most stable, ChatGPT uses this)
+   const byTestId = document.querySelector('button[data-testid="stop-button"]');
+   if (byTestId) return true;
+   // Selector 2: aria-label exact patterns (fallback)
+   // Restrict to form area only — [role="presentation"] is too broad
+   const form = document.querySelector('form');
+   if (!form) return false;
+   const buttons = form.querySelectorAll('button[aria-label]');
    for (const btn of buttons) {
      const aria = (btn.getAttribute('aria-label') || '').toLowerCase();
-     if (aria.includes('stop') || aria.includes('停止')) {
-       // Exclude model selector ("5.4 Thinking" contains no stop/停止 so safe)
+     if (aria === 'stop streaming' || aria === 'stop' ||
+         aria === 'ストリーミングの停止' || aria === '停止') {
        return true;
      }
    }
@@ -116,14 +125,24 @@
    if (tickCount <= 3 || tickCount % 30 === 0) {
      console.log(`[v2] tick#${tickCount} busy=${busy} prev=${prevBusy}`);
    }
-   if (busy && !prevBusy) console.log('[v2] 🟡 IDLE → BUSY');
+   if (busy && !prevBusy) {
+     console.log('[v2] 🟡 IDLE → BUSY');
+     idleConfirmCount = 0;
+   }
    if (prevBusy && !busy) {
-     console.log('[v2] 🟢 BUSY → IDLE — sending!');
-     maybeSendCompletedMessage();
+     idleConfirmCount = 1;
+     console.log('[v2] 🟡 BUSY → maybe IDLE (confirming...)');
+   } else if (!busy && idleConfirmCount > 0) {
+     idleConfirmCount++;
+     if (idleConfirmCount >= IDLE_CONFIRM_TICKS) {
+       console.log('[v2] 🟢 IDLE confirmed — sending!');
+       maybeSendCompletedMessage();
+       idleConfirmCount = 0;
+     }
    }
    prevBusy = busy;
  }
 
- console.log('[v2] 🦞 v2.5.0 LOADED (multi-file detection + behavior-btn pattern)');
+ console.log('[v2] 🦞 v2.6.0 LOADED (isBusy hardened + idle confirm + multi-file)');
  setInterval(tick, POLL_MS);
 })();
